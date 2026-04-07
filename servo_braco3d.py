@@ -1,89 +1,111 @@
-from pyfirmata import Arduino, SERVO
+import os
 import time
 
-ANGULOS_ABERTO  = 0    
-ANGULO_POLEGAR  = 150  
-ANGULO_INDICADOR= 180 
-ANGULO_PADRAO   = 140  
+from pyfirmata2 import Arduino, SERVO
+from serial.tools import list_ports
+
+
+DEFAULT_ARDUINO_PORT = os.getenv("ARDUINO_PORT")
+ARDUINO_HINTS = ("arduino", "usb serial", "ch340", "cp210", "ftdi", "wch")
+
+ANGULOS_ABERTO = 0
+ANGULO_POLEGAR = 150
+ANGULO_INDICADOR = 180
+ANGULO_PADRAO = 140
 
 ANGULOS_FECHADO: dict[int, int] = {
     10: ANGULO_POLEGAR,
-    9:  ANGULO_INDICADOR,
-    8:  ANGULO_PADRAO,
-    7:  ANGULO_PADRAO,
-    6:  ANGULO_PADRAO,
+    9: ANGULO_INDICADOR,
+    8: ANGULO_PADRAO,
+    7: ANGULO_PADRAO,
+    6: ANGULO_PADRAO,
 }
-
 
 NOME_DEDO: dict[int, str] = {
     10: "Polegar",
-    9:  "Indicador",
-    8:  "Médio",
-    7:  "Anelar",
-    6:  "Mínimo",
+    9: "Indicador",
+    8: "Medio",
+    7: "Anelar",
+    6: "Minimo",
 }
 
 
 class MaoRobotica:
+    PINOS = [10, 9, 8, 7, 6]
 
-
-    PINOS = [10, 9, 8, 7, 6]  # polegar → mínimo
-
-    def __init__(self, porta: str = "COM3") -> None:
-        print(f"[MaoRobotica] Conectando ao Arduino em {porta}...")
-        self.board = Arduino(porta)
+    def __init__(self, porta: str | None = DEFAULT_ARDUINO_PORT) -> None:
+        self.porta = self._resolver_porta(porta)
+        print(f"[MaoRobotica] Conectando ao Arduino em {self.porta}...")
+        self.board = Arduino(self.porta)
         self._configurar_servos()
-
-        # Cache do último estado enviado para evitar comandos redundantes
-        # True = aberto, False = fechado
         self._estado: dict[int, bool | None] = {pino: None for pino in self.PINOS}
-
         print("[MaoRobotica] Pronto.")
 
+    @staticmethod
+    def _resolver_porta(porta_informada: str | None) -> str:
+        if porta_informada:
+            return porta_informada
+
+        for porta in list_ports.comports():
+            texto = " ".join(
+                parte for parte in (
+                    porta.device,
+                    porta.description,
+                    porta.manufacturer,
+                )
+                if parte
+            ).lower()
+            if any(hint in texto for hint in ARDUINO_HINTS):
+                print(
+                    "[MaoRobotica] Porta detectada automaticamente: "
+                    f"{porta.device} ({porta.description})"
+                )
+                return porta.device
+
+        portas_disponiveis = [
+            f"{porta.device} ({porta.description})" for porta in list_ports.comports()
+        ]
+        portas_texto = ", ".join(portas_disponiveis) if portas_disponiveis else "nenhuma"
+        raise RuntimeError(
+            "Nao foi possivel detectar o Arduino automaticamente. "
+            f"Portas encontradas: {portas_texto}. "
+            "Use --porta COMx ou defina ARDUINO_PORT."
+        )
 
     def _configurar_servos(self) -> None:
-        """Coloca todos os pinos no modo SERVO."""
         for pino in self.PINOS:
             self.board.digital[pino].mode = SERVO
 
+    def _validar_pino(self, pino: int) -> None:
+        if pino not in self.PINOS:
+            raise ValueError(f"Pino de servo invalido: {pino}")
 
     def _mover_servo(self, pino: int, angulo: int) -> None:
-        """
-        Envia um ângulo para um servo específico.
-
-        Parâmetros
-        ----------
-        pino   : número do pino digital do Arduino
-        angulo : ângulo desejado em graus (0–180)
-        """
+        self._validar_pino(pino)
         self.board.digital[pino].write(angulo)
-        time.sleep(0.015)  # pequena pausa para o servo responder
-
- 
+        time.sleep(0.015)
 
     def definir_dedo(self, pino: int, aberto: bool) -> None:
-        
+        self._validar_pino(pino)
+
         if self._estado[pino] == aberto:
-            return  # sem mudança, não faz nada
+            return
 
         angulo = ANGULOS_ABERTO if aberto else ANGULOS_FECHADO[pino]
         self._mover_servo(pino, angulo)
         self._estado[pino] = aberto
 
     def abrir_todos(self) -> None:
-        """Abre todos os dedos (posição de repouso)."""
         for pino in self.PINOS:
             self._mover_servo(pino, ANGULOS_ABERTO)
             self._estado[pino] = True
 
     def fechar_todos(self) -> None:
-        """Fecha todos os dedos."""
         for pino in self.PINOS:
             self._mover_servo(pino, ANGULOS_FECHADO[pino])
             self._estado[pino] = False
 
     def testar_todos(self) -> None:
-    
         print("[Teste] Abrindo todos os dedos...")
         self.abrir_todos()
         time.sleep(1)
@@ -98,12 +120,13 @@ class MaoRobotica:
             self._estado[pino] = True
             time.sleep(1)
 
-        print("[Teste] Concluído.")
+        print("[Teste] Concluido.")
 
     def encerrar(self) -> None:
-        """Abre todos os dedos e encerra a conexão com o Arduino com segurança."""
-        print("[MaoRobotica] Encerrando — abrindo dedos e fechando porta serial...")
-        self.abrir_todos()
-        time.sleep(0.5)
-        self.board.exit()
-        print("[MaoRobotica] Conexão encerrada.")
+        print("[MaoRobotica] Encerrando e fechando a porta serial...")
+        try:
+            self.abrir_todos()
+            time.sleep(0.5)
+        finally:
+            self.board.exit()
+            print("[MaoRobotica] Conexao encerrada.")
