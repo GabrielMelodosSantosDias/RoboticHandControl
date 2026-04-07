@@ -1,31 +1,41 @@
 import argparse
+import os
 import sys
+import time
 
 from servo_braco3d import MaoRobotica, NOME_DEDO
 
 
+DEFAULT_ARDUINO_PORT = os.getenv("ARDUINO_PORT")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Testa os servos da mão robótica via Arduino."
+        description="Testa os servos da mao robotica via Arduino."
     )
     parser.add_argument(
-        "--porta", default="COM3",
-        help="Porta serial do Arduino (padrão: COM3)"
+        "--porta",
+        default=DEFAULT_ARDUINO_PORT,
+        help=(
+            "Porta serial do Arduino. Se omitida, usa ARDUINO_PORT "
+            "ou tenta detectar automaticamente."
+        ),
     )
     parser.add_argument(
         "--dedo",
         choices=["polegar", "indicador", "medio", "anelar", "minimo", "todos"],
         default="todos",
-        help="Qual dedo testar (padrão: todos)"
+        help="Qual dedo testar (padrao: todos).",
     )
     return parser.parse_args()
 
+
 PINO_POR_NOME = {
-    "polegar":   10,
-    "indicador":  9,
-    "medio":      8,
-    "anelar":     7,
-    "minimo":     6,
+    "polegar": 10,
+    "indicador": 9,
+    "medio": 8,
+    "anelar": 7,
+    "minimo": 6,
 }
 
 
@@ -34,8 +44,8 @@ def main() -> None:
 
     try:
         mao = MaoRobotica(porta=args.porta)
-    except Exception as e:
-        print(f"[ERRO] Não foi possível conectar ao Arduino: {e}")
+    except Exception as erro:
+        print(f"[ERRO] Nao foi possivel conectar ao Arduino na porta {args.porta}: {erro}")
         sys.exit(1)
 
     try:
@@ -47,18 +57,15 @@ def main() -> None:
             nome = NOME_DEDO[pino]
             print(f"[Teste] Testando apenas: {nome} (pino {pino})")
 
-            
             mao.abrir_todos()
-
-            import time
-            mao.definir_dedo(pino, False)   # fecha
+            mao.definir_dedo(pino, False)
             time.sleep(1)
-            mao.definir_dedo(pino, True)    # abre
+            mao.definir_dedo(pino, True)
             time.sleep(1)
             print(f"[Teste] {nome} OK.")
 
     except KeyboardInterrupt:
-        print("\n[Teste] Interrompido pelo usuário.")
+        print("\n[Teste] Interrompido pelo usuario.")
 
     finally:
         mao.encerrar()
